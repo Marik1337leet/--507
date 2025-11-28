@@ -2,15 +2,24 @@ import os
 import asyncio
 import logging
 import json
-import re
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.types import BotCommand, BotCommandScopeDefault
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+
+try:
+    from aiogram import Bot, Dispatcher, types, F
+    from aiogram.filters import Command
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from aiogram.types import BotCommand, BotCommandScopeDefault
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from dotenv import load_dotenv
+except ImportError as e:
+    print(f"Ошибка импорта: {e}")
+    print("Установите зависимости: pip install aiogram apscheduler python-dotenv")
+    exit(1)
+
+# Загрузка переменных окружения из .env файла
+load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +27,14 @@ logger = logging.getLogger(__name__)
 
 # 🔑 Токен бота теперь берется из переменных окружения
 TOKEN = os.getenv("BOT_TOKEN")
+
+# Проверка токена
+if not TOKEN:
+    logger.error("❌ Токен бота не найден! Убедитесь, что файл .env существует и содержит BOT_TOKEN")
+    print("❌ Токен бота не найден!")
+    print("📝 Создайте файл .env в той же папке, что и bot.py")
+    print("📝 Добавьте в него: BOT_TOKEN=ваш_токен_от_botfather")
+    exit(1)
 
 # ID группы для отправки расписания
 GROUP_CHAT_ID = None
@@ -98,19 +115,23 @@ async def set_bot_commands():
     commands = [
         BotCommand(command="start", description="Настройка бота"),
         BotCommand(command="id", description="Узнать свой ID"),
-        BotCommand(command="сегодня", description="Расписание на сегодня"),
-        BotCommand(command="завтра", description="Расписание на завтра"),
-        BotCommand(command="неделя", description="Какая сейчас неделя"),
-        BotCommand(command="понедельник", description="Расписание на понедельник"),
-        BotCommand(command="вторник", description="Расписание на вторник"),
-        BotCommand(command="среда", description="Расписание на среду"),
-        BotCommand(command="четверг", description="Расписание на четверг"),
-        BotCommand(command="пятница", description="Расписание на пятницу"),
-        BotCommand(command="суббота", description="Расписание на субботу"),
-        BotCommand(command="воскресенье", description="Расписание на воскресенье"),
-        BotCommand(command="объявление", description="Создать объявление (админы)"),
+        BotCommand(command="today", description="Расписание на сегодня"),
+        BotCommand(command="tomorrow", description="Расписание на завтра"),
+        BotCommand(command="week", description="Какая сейчас неделя"),
+        BotCommand(command="monday", description="Расписание на понедельник"),
+        BotCommand(command="tuesday", description="Расписание на вторник"),
+        BotCommand(command="wednesday", description="Расписание на среду"),
+        BotCommand(command="thursday", description="Расписание на четверг"),
+        BotCommand(command="friday", description="Расписание на пятницу"),
+        BotCommand(command="saturday", description="Расписание на субботу"),
+        BotCommand(command="sunday", description="Расписание на воскресенье"),
+        BotCommand(command="announce", description="Создать объявление (админы)"),
     ]
-    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+    try:
+        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+        logger.info("Команды бота успешно установлены")
+    except Exception as e:
+        logger.error(f"Ошибка установки команд: {e}")
 
 async def unpin_previous_message():
     """Открепляет и удаляет предыдущее сообщение с расписанием"""
@@ -160,22 +181,7 @@ async def send_daily_schedule():
             text = "❌ Расписание на этот день не настроено"
     
     try:
-        # Добавляем информацию о следующем дне
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%A").lower()
-        tomorrow_rus = days_map.get(tomorrow, "")
-        tomorrow_preview = ""
-        
-        if tomorrow_rus and tomorrow_rus not in ["суббота", "воскресенье"]:
-            tomorrow_schedule = schedule.get(tomorrow_rus, {})
-            if isinstance(tomorrow_schedule, dict):
-                tomorrow_week_type = "нижняя" if week_type == "верхняя" else "верхняя"
-                tomorrow_text = tomorrow_schedule.get(tomorrow_week_type, "")
-                if tomorrow_text and "❌" not in tomorrow_text:
-                    # Берем только первую пару для предпросмотра
-                    first_pair = tomorrow_text.split('\n')[1] if '\n' in tomorrow_text else tomorrow_text
-                    tomorrow_preview = f"\n\n🔜 <b>Завтра:</b> {first_pair}"
-        
-        message = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n\n{text}{tomorrow_preview}\n\n<i>Автоматическое сообщение • {datetime.now().strftime('%d.%m.%Y')}</i>"
+        message = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n\n{text}\n\n<i>Автоматическое сообщение • {datetime.now().strftime('%d.%m.%Y')}</i>"
         sent_message = await bot.send_message(GROUP_CHAT_ID, message)
         
         # Закрепляем сообщение
@@ -216,7 +222,7 @@ async def cmd_start(message: types.Message):
             f"• <b>Расписание:</b> ежедневно в 7:00\n"
             f"• <b>Сообщения:</b> автоматически закрепляются\n"
             f"• <b>Команды:</b> используйте меню слева от поля ввода\n\n"
-            f"<i>Администраторы могут использовать /загрузитьрасписание и /объявление</i>"
+            f"<i>Администраторы могут использовать /upload_schedule и /announce</i>"
         )
     else:
         await message.answer("Добавьте меня в группу и используйте /start для настройки")
@@ -228,7 +234,7 @@ async def get_user_id(message: types.Message):
     chat_id = message.chat.id
     await message.answer(f"🆔 <b>Ваш ID:</b> {user_id}\n<b>ID чата:</b> {chat_id}")
 
-@dp.message(Command(commands=["сегодня"]))
+@dp.message(Command(commands=["today"]))
 async def send_today_schedule(message: types.Message):
     """Расписание на сегодня"""
     today = datetime.now().strftime("%A").lower()
@@ -245,7 +251,7 @@ async def send_today_schedule(message: types.Message):
     message_text = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n({day_rus.capitalize()}, {week_type} неделя)\n\n{text}"
     await message.answer(message_text)
 
-@dp.message(Command(commands=["завтра"]))
+@dp.message(Command(commands=["tomorrow"]))
 async def send_tomorrow_schedule(message: types.Message):
     """Расписание на завтра"""
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%A").lower()
@@ -264,7 +270,7 @@ async def send_tomorrow_schedule(message: types.Message):
     message_text = f"<b>📅 РАСПИСАНИЕ НА ЗАВТРА</b>\n({day_rus.capitalize()}, {tomorrow_week_type} неделя)\n\n{text}"
     await message.answer(message_text)
 
-@dp.message(Command(commands=["неделя"]))
+@dp.message(Command(commands=["week"]))
 async def send_week_info(message: types.Message):
     """Какая сейчас неделя"""
     week_type = get_current_week()
@@ -278,25 +284,36 @@ async def send_week_info(message: types.Message):
         f"• <b>Сегодня:</b> {datetime.now().strftime('%d.%m.%Y')}"
     )
 
-@dp.message(Command(commands=["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"]))
+@dp.message(Command(commands=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]))
 async def send_schedule(message: types.Message):
     """Ручная команда для получения расписания"""
-    day = message.text.replace("/", "").lower()
+    day_en = message.text.replace("/", "").lower()
+    days_map = {
+        "monday": "понедельник",
+        "tuesday": "вторник", 
+        "wednesday": "среда",
+        "thursday": "четверг",
+        "friday": "пятница",
+        "saturday": "суббота",
+        "sunday": "воскресенье"
+    }
+    
+    day_rus = days_map.get(day_en, day_en)
     week_type = get_current_week()
     
-    text = get_schedule_for_day(day, week_type)
+    text = get_schedule_for_day(day_rus, week_type)
     next_week_type = "нижняя" if week_type == "верхняя" else "верхняя"
-    next_week_text = get_schedule_for_day(day, next_week_type)
+    next_week_text = get_schedule_for_day(day_rus, next_week_type)
     
-    message_text = f"<b>📅 РАСПИСАНИЕ НА {day.upper()}</b>\n\n"
+    message_text = f"<b>📅 РАСПИСАНИЕ НА {day_rus.upper()}</b>\n\n"
     message_text += f"<b>{week_type.capitalize()} неделя:</b>\n{text}\n\n"
     
-    if day not in ["суббота", "воскресенье"]:
+    if day_rus not in ["суббота", "воскресенье"]:
         message_text += f"<b>{next_week_type.capitalize()} неделя:</b>\n{next_week_text}"
     
     await message.answer(message_text)
 
-@dp.message(Command(commands=["объявление"]))
+@dp.message(Command(commands=["announce"]))
 async def create_announcement(message: types.Message):
     """Создание объявления с @everyone в конце"""
     if message.chat.type not in ["group", "supergroup"]:
@@ -308,9 +325,9 @@ async def create_announcement(message: types.Message):
         await message.answer(f"❌ Только администраторы могут создавать объявления!\nВаш ID: {user_id}")
         return
     
-    announcement_text = message.text.replace("/объявление", "").strip()
+    announcement_text = message.text.replace("/announce", "").strip()
     if not announcement_text:
-        await message.answer("❌ Укажите текст объявления после команды /объявление")
+        await message.answer("❌ Укажите текст объявления после команды /announce")
         return
     
     announcement_message = f"<b>📢 ОБЪЯВЛЕНИЕ</b>\n\n{announcement_text}\n\n@everyone"
@@ -325,7 +342,7 @@ async def create_announcement(message: types.Message):
         logger.error(f"Ошибка при отправке объявления: {e}")
         await message.answer("❌ Произошла ошибка при создании объявления")
 
-@dp.message(Command(commands=["загрузитьрасписание"]))
+@dp.message(Command(commands=["upload_schedule"]))
 async def upload_schedule(message: types.Message):
     """Загрузка расписания администратором"""
     user_id = message.from_user.id
@@ -338,22 +355,22 @@ async def upload_schedule(message: types.Message):
 
 Отправьте расписание в формате:
 
-<code>/установитьрасписание понедельник верхняя
+<code>/set_schedule monday upper
 1. Предмет (Преподаватель, кабинет)
 2. Предмет (Преподаватель, кабинет)
 ...</code>
 
 Или для выходных:
-<code>/установитьрасписание суббота
+<code>/set_schedule saturday
 Выходной день</code>
 
-Доступные дни: понедельник, вторник, среда, четверг, пятница, суббота, воскресенье
-Типы недель: верхняя, нижняя
+Доступные дни: monday, tuesday, wednesday, thursday, friday, saturday, sunday
+Типы недель: upper, lower
     """
     
     await message.answer(help_text)
 
-@dp.message(Command(commands=["установитьрасписание"]))
+@dp.message(Command(commands=["set_schedule"]))
 async def set_schedule(message: types.Message):
     """Установка расписания для конкретного дня и недели"""
     user_id = message.from_user.id
@@ -364,10 +381,10 @@ async def set_schedule(message: types.Message):
     try:
         parts = message.text.split('\n', 1)
         if len(parts) < 2:
-            await message.answer("❌ Неправильный формат. Используйте:\n/установитьрасписание день неделя\nрасписание...")
+            await message.answer("❌ Неправильный формат. Используйте:\n/set_schedule day week\nрасписание...")
             return
         
-        header = parts[0].replace("/установитьрасписание", "").strip()
+        header = parts[0].replace("/set_schedule", "").strip()
         schedule_text = parts[1].strip()
         
         header_parts = header.split()
@@ -375,42 +392,57 @@ async def set_schedule(message: types.Message):
             await message.answer("❌ Укажите день недели")
             return
         
-        day = header_parts[0].lower()
-        valid_days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        day_en = header_parts[0].lower()
+        days_map = {
+            "monday": "понедельник",
+            "tuesday": "вторник",
+            "wednesday": "среда", 
+            "thursday": "четверг",
+            "friday": "пятница",
+            "saturday": "суббота",
+            "sunday": "воскресенье"
+        }
         
-        if day not in valid_days:
-            await message.answer(f"❌ Неправильный день. Доступные: {', '.join(valid_days)}")
+        day_rus = days_map.get(day_en)
+        if not day_rus:
+            await message.answer(f"❌ Неправильный день. Доступные: {', '.join(days_map.keys())}")
             return
         
         # Для выходных дней
-        if day in ["суббота", "воскресенье"]:
-            schedule[day] = schedule_text
+        if day_rus in ["суббота", "воскресенье"]:
+            schedule[day_rus] = schedule_text
             save_data()
-            await message.answer(f"✅ Расписание для {day} установлено!")
+            await message.answer(f"✅ Расписание для {day_rus} установлено!")
             return
         
         # Для учебных дней
         if len(header_parts) < 2:
-            await message.answer("❌ Для учебных дней укажите тип недели (верхняя/нижняя)")
+            await message.answer("❌ Для учебных дней укажите тип недели (upper/lower)")
             return
         
-        week_type = header_parts[1].lower()
-        if week_type not in ["верхняя", "нижняя"]:
-            await message.answer("❌ Тип недели должен быть 'верхняя' или 'нижняя'")
+        week_type_en = header_parts[1].lower()
+        week_type_map = {
+            "upper": "верхняя",
+            "lower": "нижняя"
+        }
+        
+        week_type_rus = week_type_map.get(week_type_en)
+        if not week_type_rus:
+            await message.answer("❌ Тип недели должен быть 'upper' или 'lower'")
             return
         
-        if day not in schedule:
-            schedule[day] = {}
+        if day_rus not in schedule:
+            schedule[day_rus] = {}
         
-        schedule[day][week_type] = schedule_text
+        schedule[day_rus][week_type_rus] = schedule_text
         save_data()
-        await message.answer(f"✅ Расписание для {day} ({week_type} неделя) установлено!")
+        await message.answer(f"✅ Расписание для {day_rus} ({week_type_rus} неделя) установлено!")
         
     except Exception as e:
         logger.error(f"Ошибка установки расписания: {e}")
         await message.answer("❌ Произошла ошибка при установке расписания")
 
-@dp.message(Command(commands=["админы"]))
+@dp.message(Command(commands=["admins"]))
 async def show_admins(message: types.Message):
     """Показать список администраторов"""
     user_id = message.from_user.id
@@ -420,7 +452,7 @@ async def show_admins(message: types.Message):
     else:
         await message.answer(f"❌ У вас нет прав для этой команды\nВаш ID: {user_id}")
 
-@dp.message(Command(commands=["добавитьадмин"]))
+@dp.message(Command(commands=["add_admin"]))
 async def add_admin(message: types.Message):
     """Добавить администратора (только для существующих админов)"""
     user_id = message.from_user.id
@@ -435,11 +467,11 @@ async def add_admin(message: types.Message):
         await message.answer(f"✅ ID {new_admin_id} добавлен в администраторы!")
         logger.info(f"Добавлен новый администратор: {new_admin_id}")
     except (IndexError, ValueError):
-        await message.answer("❌ Используйте: /добавитьадмин <ID_пользователя>")
+        await message.answer("❌ Используйте: /add_admin <ID_пользователя>")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-@dp.message(Command(commands=["удалитьадмин"]))
+@dp.message(Command(commands=["remove_admin"]))
 async def remove_admin(message: types.Message):
     """Удалить администратора"""
     user_id = message.from_user.id
@@ -460,11 +492,11 @@ async def remove_admin(message: types.Message):
         else:
             await message.answer("❌ Этот пользователь не является администратором")
     except (IndexError, ValueError):
-        await message.answer("❌ Используйте: /удалитьадмин <ID_пользователя>")
+        await message.answer("❌ Используйте: /remove_admin <ID_пользователя>")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-@dp.message(Command(commands=["очиститьрасписание"]))
+@dp.message(Command(commands=["clear_schedule"]))
 async def clear_schedule(message: types.Message):
     """Очистить все расписание"""
     user_id = message.from_user.id
