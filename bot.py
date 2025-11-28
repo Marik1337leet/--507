@@ -36,9 +36,6 @@ if not TOKEN:
     print("📝 Добавьте в него: BOT_TOKEN=ваш_токен_от_botfather")
     exit(1)
 
-# ID группы для отправки расписания
-GROUP_CHAT_ID = None
-
 # ⚡ ВПИШИТЕ СЮДА ID ВАШИХ АДМИНИСТРАТОРОВ ⚡
 ADMIN_IDS = {5810097604}  # Замените эти числа на реальные ID администраторов
 
@@ -46,49 +43,35 @@ ADMIN_IDS = {5810097604}  # Замените эти числа на реальн
 pinned_messages = {}
 
 # Файлы для хранения данных
-SCHEDULE_FILE = "schedule.json"
+GROUPS_FILE = "groups.json"
 CONFIG_FILE = "config.json"
+
+# Структура данных для групп
+groups_data = {}
 
 # Загрузка данных из файлов
 def load_data():
-    global schedule, START_DATE
+    global groups_data, ADMIN_IDS
     try:
-        if os.path.exists(SCHEDULE_FILE):
-            with open(SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                schedule = data.get('schedule', {})
-                START_DATE = datetime.fromisoformat(data.get('start_date', '2024-09-01'))
-        else:
-            # Значения по умолчанию
-            schedule = {
-                "понедельник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-                "вторник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-                "среда": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-                "четверг": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-                "пятница": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-                "суббота": "📅 Суббота — выходной 😴",
-                "воскресенье": "📅 Воскресенье — выходной 😴"
-            }
-            START_DATE = datetime(2024, 9, 1)
+        if os.path.exists(GROUPS_FILE):
+            with open(GROUPS_FILE, 'r', encoding='utf-8') as f:
+                groups_data = json.load(f)
         
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 ADMIN_IDS.update(set(config.get('admin_ids', [])))
+                
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
-        schedule = {}
-        START_DATE = datetime(2024, 9, 1)
+        groups_data = {}
 
 # Сохранение данных в файлы
 def save_data():
     try:
-        # Сохраняем расписание
-        with open(SCHEDULE_FILE, 'w', encoding='utf-8') as f:
-            json.dump({
-                'schedule': schedule,
-                'start_date': START_DATE.isoformat()
-            }, f, ensure_ascii=False, indent=2)
+        # Сохраняем данные групп
+        with open(GROUPS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(groups_data, f, ensure_ascii=False, indent=2)
         
         # Сохраняем конфигурацию
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -98,10 +81,42 @@ def save_data():
     except Exception as e:
         logger.error(f"Ошибка сохранения данных: {e}")
 
-# Определяем текущую неделю
-def get_current_week():
+def init_group_data(chat_id):
+    """Инициализирует данные для новой группы"""
+    if str(chat_id) not in groups_data:
+        groups_data[str(chat_id)] = {
+            "start_date": "2024-09-01",
+            "schedule": {
+                "понедельник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
+                "вторник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
+                "среда": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
+                "четверг": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
+                "пятница": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
+                "суббота": "📅 Суббота — выходной 😴",
+                "воскресенье": "📅 Воскресенье — выходной 😴"
+            },
+            "admins": [],
+            "created_at": datetime.now().isoformat()
+        }
+        save_data()
+        return True
+    return False
+
+def get_group_schedule(chat_id):
+    """Получает расписание для конкретной группы"""
+    return groups_data.get(str(chat_id), {}).get("schedule", {})
+
+def get_group_start_date(chat_id):
+    """Получает дату начала семестра для группы"""
+    group_data = groups_data.get(str(chat_id), {})
+    start_date_str = group_data.get("start_date", "2024-09-01")
+    return datetime.fromisoformat(start_date_str)
+
+def get_current_week(chat_id):
+    """Определяет текущую неделю для группы"""
+    start_date = get_group_start_date(chat_id)
     now = datetime.now()
-    delta = now - START_DATE
+    delta = now - start_date
     week_number = delta.days // 7
     return "верхняя" if week_number % 2 == 0 else "нижняя"
 
@@ -126,6 +141,7 @@ async def set_bot_commands():
         BotCommand(command="saturday", description="Расписание на субботу"),
         BotCommand(command="sunday", description="Расписание на воскресенье"),
         BotCommand(command="announce", description="Создать объявление (админы)"),
+        BotCommand(command="upload_schedule", description="Загрузить расписание (админы)"),
     ]
     try:
         await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
@@ -133,69 +149,71 @@ async def set_bot_commands():
     except Exception as e:
         logger.error(f"Ошибка установки команд: {e}")
 
-async def unpin_previous_message():
+async def unpin_previous_message(chat_id):
     """Открепляет и удаляет предыдущее сообщение с расписанием"""
-    if GROUP_CHAT_ID and pinned_messages.get(GROUP_CHAT_ID):
+    if pinned_messages.get(chat_id):
         try:
-            message_id = pinned_messages[GROUP_CHAT_ID]
-            await bot.unpin_chat_message(GROUP_CHAT_ID, message_id)
-            await bot.delete_message(GROUP_CHAT_ID, message_id)
-            logger.info(f"Сообщение {message_id} откреплено и удалено")
-            pinned_messages[GROUP_CHAT_ID] = None
+            message_id = pinned_messages[chat_id]
+            await bot.unpin_chat_message(chat_id, message_id)
+            await bot.delete_message(chat_id, message_id)
+            logger.info(f"Сообщение {message_id} откреплено и удалено для чата {chat_id}")
+            pinned_messages[chat_id] = None
         except Exception as e:
             logger.error(f"Ошибка при откреплении сообщения: {e}")
 
 async def send_daily_schedule():
-    """Отправляет расписание на текущий день в группу и закрепляет его"""
-    if not GROUP_CHAT_ID:
-        logger.warning("GROUP_CHAT_ID не установлен")
-        return
-    
-    # Открепляем предыдущее сообщение
-    await unpin_previous_message()
-    
-    today = datetime.now().strftime("%A").lower()
-    days_map = {
-        "monday": "понедельник",
-        "tuesday": "вторник",
-        "wednesday": "среда",
-        "thursday": "четверг",
-        "friday": "пятница",
-        "saturday": "суббота",
-        "sunday": "воскресенье"
-    }
-    
-    day_rus = days_map.get(today)
-    if not day_rus:
-        return
-    
-    week_type = get_current_week()
-    
-    if day_rus in ["суббота", "воскресенье"]:
-        text = schedule.get(day_rus, "❌ Расписание на этот день не настроено")
-    else:
-        day_schedule = schedule.get(day_rus)
-        if day_schedule and isinstance(day_schedule, dict):
-            text = day_schedule.get(week_type, "❌ Расписание на эту неделю не настроено")
+    """Отправляет расписание на текущий день во все группы и закрепляет его"""
+    for chat_id_str in groups_data.keys():
+        chat_id = int(chat_id_str)
+        
+        # Открепляем предыдущее сообщение
+        await unpin_previous_message(chat_id)
+        
+        today = datetime.now().strftime("%A").lower()
+        days_map = {
+            "monday": "понедельник",
+            "tuesday": "вторник",
+            "wednesday": "среда",
+            "thursday": "четверг",
+            "friday": "пятница",
+            "saturday": "суббота",
+            "sunday": "воскресенье"
+        }
+        
+        day_rus = days_map.get(today)
+        if not day_rus:
+            continue
+        
+        week_type = get_current_week(chat_id)
+        schedule = get_group_schedule(chat_id)
+        
+        if day_rus in ["суббота", "воскресенье"]:
+            text = schedule.get(day_rus, "❌ Расписание на этот день не настроено")
         else:
-            text = "❌ Расписание на этот день не настроено"
-    
-    try:
-        message = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n\n{text}\n\n<i>Автоматическое сообщение • {datetime.now().strftime('%d.%m.%Y')}</i>"
-        sent_message = await bot.send_message(GROUP_CHAT_ID, message)
+            day_schedule = schedule.get(day_rus)
+            if day_schedule and isinstance(day_schedule, dict):
+                text = day_schedule.get(week_type, "❌ Расписание на эту неделю не настроено")
+            else:
+                text = "❌ Расписание на этот день не настроено"
         
-        # Закрепляем сообщение
-        await bot.pin_chat_message(GROUP_CHAT_ID, sent_message.message_id)
-        pinned_messages[GROUP_CHAT_ID] = sent_message.message_id
-        
-        logger.info(f"Расписание отправлено и закреплено для {day_rus} ({week_type} неделя)")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке расписания: {e}")
+        try:
+            message = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n\n{text}\n\n<i>Автоматическое сообщение • {datetime.now().strftime('%d.%m.%Y')}</i>"
+            sent_message = await bot.send_message(chat_id, message)
+            
+            # Закрепляем сообщение
+            await bot.pin_chat_message(chat_id, sent_message.message_id)
+            pinned_messages[chat_id] = sent_message.message_id
+            
+            logger.info(f"Расписание отправлено и закреплено для чата {chat_id} - {day_rus} ({week_type} неделя)")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке расписания в чат {chat_id}: {e}")
 
-def get_schedule_for_day(day: str, week_type: str = None):
+def get_schedule_for_day(chat_id, day: str, week_type: str = None):
     """Получить расписание для указанного дня"""
     if not week_type:
-        week_type = get_current_week()
+        week_type = get_current_week(chat_id)
+    
+    schedule = get_group_schedule(chat_id)
     
     if day in ["суббота", "воскресенье"]:
         return schedule.get(day, "❌ Расписание не настроено")
@@ -208,22 +226,25 @@ def get_schedule_for_day(day: str, week_type: str = None):
 @dp.message(Command(commands=["start", "help"]))
 async def cmd_start(message: types.Message):
     """Команда для установки группы"""
-    global GROUP_CHAT_ID
     if message.chat.type in ["group", "supergroup"]:
-        GROUP_CHAT_ID = message.chat.id
-        
-        # Сохраняем ID группы в конфиг
-        save_data()
+        is_new_group = init_group_data(message.chat.id)
         
         user_id = message.from_user.id
-        await message.answer(
-            f"✅ <b>Бот настроен для этой группы!</b>\n\n"
+        response = f"✅ <b>Бот настроен для этой группы!</b>\n\n"
+        
+        if is_new_group:
+            response += "🎉 <b>Создана новая база данных для группы</b>\n"
+        
+        response += (
+            f"• <b>ID группы:</b> {message.chat.id}\n"
             f"• <b>Ваш ID:</b> {user_id}\n"
             f"• <b>Расписание:</b> ежедневно в 7:00\n"
             f"• <b>Сообщения:</b> автоматически закрепляются\n"
             f"• <b>Команды:</b> используйте меню слева от поля ввода\n\n"
-            f"<i>Администраторы могут использовать /upload_schedule и /announce</i>"
+            f"<i>Администраторы могут использовать /upload_schedule для загрузки расписания</i>"
         )
+        
+        await message.answer(response)
     else:
         await message.answer("Добавьте меня в группу и используйте /start для настройки")
 
@@ -237,6 +258,12 @@ async def get_user_id(message: types.Message):
 @dp.message(Command(commands=["today"]))
 async def send_today_schedule(message: types.Message):
     """Расписание на сегодня"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    init_group_data(message.chat.id)
+    
     today = datetime.now().strftime("%A").lower()
     days_map = {
         "monday": "понедельник", "tuesday": "вторник", "wednesday": "среда",
@@ -245,8 +272,8 @@ async def send_today_schedule(message: types.Message):
     }
     
     day_rus = days_map.get(today, "понедельник")
-    week_type = get_current_week()
-    text = get_schedule_for_day(day_rus, week_type)
+    week_type = get_current_week(message.chat.id)
+    text = get_schedule_for_day(message.chat.id, day_rus, week_type)
     
     message_text = f"<b>📅 РАСПИСАНИЕ НА СЕГОДНЯ</b>\n({day_rus.capitalize()}, {week_type} неделя)\n\n{text}"
     await message.answer(message_text)
@@ -254,6 +281,12 @@ async def send_today_schedule(message: types.Message):
 @dp.message(Command(commands=["tomorrow"]))
 async def send_tomorrow_schedule(message: types.Message):
     """Расписание на завтра"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    init_group_data(message.chat.id)
+    
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%A").lower()
     days_map = {
         "monday": "понедельник", "tuesday": "вторник", "wednesday": "среда",
@@ -262,10 +295,10 @@ async def send_tomorrow_schedule(message: types.Message):
     }
     
     day_rus = days_map.get(tomorrow, "понедельник")
-    week_type = get_current_week()
+    week_type = get_current_week(message.chat.id)
     # Для завтрашнего дня меняем тип недели
     tomorrow_week_type = "нижняя" if week_type == "верхняя" else "верхняя"
-    text = get_schedule_for_day(day_rus, tomorrow_week_type)
+    text = get_schedule_for_day(message.chat.id, day_rus, tomorrow_week_type)
     
     message_text = f"<b>📅 РАСПИСАНИЕ НА ЗАВТРА</b>\n({day_rus.capitalize()}, {tomorrow_week_type} неделя)\n\n{text}"
     await message.answer(message_text)
@@ -273,20 +306,33 @@ async def send_tomorrow_schedule(message: types.Message):
 @dp.message(Command(commands=["week"]))
 async def send_week_info(message: types.Message):
     """Какая сейчас неделя"""
-    week_type = get_current_week()
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    init_group_data(message.chat.id)
+    
+    week_type = get_current_week(message.chat.id)
     next_week_type = "нижняя" if week_type == "верхняя" else "верхняя"
+    start_date = get_group_start_date(message.chat.id)
     
     await message.answer(
         f"<b>📊 ИНФОРМАЦИЯ О НЕДЕЛЕ</b>\n\n"
         f"• <b>Текущая неделя:</b> {week_type.capitalize()}\n"
         f"• <b>Следующая неделя:</b> {next_week_type.capitalize()}\n"
-        f"• <b>Начало семестра:</b> {START_DATE.strftime('%d.%m.%Y')}\n"
+        f"• <b>Начало семестра:</b> {start_date.strftime('%d.%m.%Y')}\n"
         f"• <b>Сегодня:</b> {datetime.now().strftime('%d.%m.%Y')}"
     )
 
 @dp.message(Command(commands=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]))
 async def send_schedule(message: types.Message):
     """Ручная команда для получения расписания"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    init_group_data(message.chat.id)
+    
     day_en = message.text.replace("/", "").lower()
     days_map = {
         "monday": "понедельник",
@@ -299,11 +345,11 @@ async def send_schedule(message: types.Message):
     }
     
     day_rus = days_map.get(day_en, day_en)
-    week_type = get_current_week()
+    week_type = get_current_week(message.chat.id)
     
-    text = get_schedule_for_day(day_rus, week_type)
+    text = get_schedule_for_day(message.chat.id, day_rus, week_type)
     next_week_type = "нижняя" if week_type == "верхняя" else "верхняя"
-    next_week_text = get_schedule_for_day(day_rus, next_week_type)
+    next_week_text = get_schedule_for_day(message.chat.id, day_rus, next_week_type)
     
     message_text = f"<b>📅 РАСПИСАНИЕ НА {day_rus.upper()}</b>\n\n"
     message_text += f"<b>{week_type.capitalize()} неделя:</b>\n{text}\n\n"
@@ -345,6 +391,10 @@ async def create_announcement(message: types.Message):
 @dp.message(Command(commands=["upload_schedule"]))
 async def upload_schedule(message: types.Message):
     """Загрузка расписания администратором"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
         await message.answer("❌ Только администраторы могут загружать расписание!")
@@ -366,6 +416,8 @@ async def upload_schedule(message: types.Message):
 
 Доступные дни: monday, tuesday, wednesday, thursday, friday, saturday, sunday
 Типы недель: upper, lower
+
+<b>⚠️ Внимание:</b> Расписание загружается только для этой группы!
     """
     
     await message.answer(help_text)
@@ -373,6 +425,10 @@ async def upload_schedule(message: types.Message):
 @dp.message(Command(commands=["set_schedule"]))
 async def set_schedule(message: types.Message):
     """Установка расписания для конкретного дня и недели"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
         await message.answer("❌ Только администраторы могут устанавливать расписание!")
@@ -392,6 +448,9 @@ async def set_schedule(message: types.Message):
             await message.answer("❌ Укажите день недели")
             return
         
+        # Инициализируем данные группы если их нет
+        init_group_data(message.chat.id)
+        
         day_en = header_parts[0].lower()
         days_map = {
             "monday": "понедельник",
@@ -410,9 +469,9 @@ async def set_schedule(message: types.Message):
         
         # Для выходных дней
         if day_rus in ["суббота", "воскресенье"]:
-            schedule[day_rus] = schedule_text
+            groups_data[str(message.chat.id)]["schedule"][day_rus] = schedule_text
             save_data()
-            await message.answer(f"✅ Расписание для {day_rus} установлено!")
+            await message.answer(f"✅ Расписание для {day_rus} установлено для этой группы!")
             return
         
         # Для учебных дней
@@ -431,16 +490,76 @@ async def set_schedule(message: types.Message):
             await message.answer("❌ Тип недели должен быть 'upper' или 'lower'")
             return
         
-        if day_rus not in schedule:
-            schedule[day_rus] = {}
+        if day_rus not in groups_data[str(message.chat.id)]["schedule"]:
+            groups_data[str(message.chat.id)]["schedule"][day_rus] = {}
         
-        schedule[day_rus][week_type_rus] = schedule_text
+        groups_data[str(message.chat.id)]["schedule"][day_rus][week_type_rus] = schedule_text
         save_data()
-        await message.answer(f"✅ Расписание для {day_rus} ({week_type_rus} неделя) установлено!")
+        await message.answer(f"✅ Расписание для {day_rus} ({week_type_rus} неделя) установлено для этой группы!")
         
     except Exception as e:
         logger.error(f"Ошибка установки расписания: {e}")
         await message.answer("❌ Произошла ошибка при установке расписания")
+
+@dp.message(Command(commands=["set_start_date"]))
+async def set_start_date(message: types.Message):
+    """Установка даты начала семестра"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("❌ Только администраторы могут устанавливать дату начала семестра!")
+        return
+    
+    try:
+        date_str = message.text.replace("/set_start_date", "").strip()
+        if not date_str:
+            await message.answer("❌ Укажите дату в формате ДД.ММ.ГГГГ")
+            return
+        
+        # Парсим дату
+        date_obj = datetime.strptime(date_str, "%d.%m.%Y")
+        
+        # Инициализируем данные группы если их нет
+        init_group_data(message.chat.id)
+        
+        # Сохраняем дату
+        groups_data[str(message.chat.id)]["start_date"] = date_obj.isoformat()
+        save_data()
+        
+        await message.answer(f"✅ Дата начала семестра установлена: {date_str}")
+        
+    except ValueError:
+        await message.answer("❌ Неправильный формат даты. Используйте: ДД.ММ.ГГГГ")
+    except Exception as e:
+        logger.error(f"Ошибка установки даты: {e}")
+        await message.answer("❌ Произошла ошибка при установке даты")
+
+@dp.message(Command(commands=["group_info"]))
+async def group_info(message: types.Message):
+    """Информация о группе"""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("Эта команда работает только в группах!")
+        return
+    
+    init_group_data(message.chat.id)
+    
+    group_data = groups_data[str(message.chat.id)]
+    start_date = datetime.fromisoformat(group_data["start_date"])
+    
+    info_text = (
+        f"<b>📊 ИНФОРМАЦИЯ О ГРУППЕ</b>\n\n"
+        f"• <b>ID группы:</b> {message.chat.id}\n"
+        f"• <b>Дата создания:</b> {datetime.fromisoformat(group_data['created_at']).strftime('%d.%m.%Y %H:%M')}\n"
+        f"• <b>Начало семестра:</b> {start_date.strftime('%d.%m.%Y')}\n"
+        f"• <b>Текущая неделя:</b> {get_current_week(message.chat.id).capitalize()}\n"
+        f"• <b>Расписание настроено:</b> {'✅' if any('❌' not in str(v) for v in group_data['schedule'].values()) else '❌'}\n\n"
+        f"<i>Используйте /upload_schedule для настройки расписания</i>"
+    )
+    
+    await message.answer(info_text)
 
 @dp.message(Command(commands=["admins"]))
 async def show_admins(message: types.Message):
@@ -448,77 +567,9 @@ async def show_admins(message: types.Message):
     user_id = message.from_user.id
     if user_id in ADMIN_IDS:
         admins_list = "\n".join([f"• {admin_id}" for admin_id in ADMIN_IDS])
-        await message.answer(f"<b>📋 Текущие администраторы:</b>\n{admins_list}\n\n<b>Ваш ID:</b> {user_id}")
+        await message.answer(f"<b>📋 Глобальные администраторы:</b>\n{admins_list}\n\n<b>Ваш ID:</b> {user_id}")
     else:
         await message.answer(f"❌ У вас нет прав для этой команды\nВаш ID: {user_id}")
-
-@dp.message(Command(commands=["add_admin"]))
-async def add_admin(message: types.Message):
-    """Добавить администратора (только для существующих админов)"""
-    user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
-        await message.answer("❌ Только администраторы могут добавлять других админов!")
-        return
-    
-    try:
-        new_admin_id = int(message.text.split()[1])
-        ADMIN_IDS.add(new_admin_id)
-        save_data()
-        await message.answer(f"✅ ID {new_admin_id} добавлен в администраторы!")
-        logger.info(f"Добавлен новый администратор: {new_admin_id}")
-    except (IndexError, ValueError):
-        await message.answer("❌ Используйте: /add_admin <ID_пользователя>")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-@dp.message(Command(commands=["remove_admin"]))
-async def remove_admin(message: types.Message):
-    """Удалить администратора"""
-    user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
-        await message.answer("❌ Только администраторы могут использовать эту команду!")
-        return
-    
-    try:
-        target_id = int(message.text.split()[1])
-        if target_id == user_id:
-            await message.answer("❌ Вы не можете удалить сами себя!")
-            return
-        
-        if target_id in ADMIN_IDS:
-            ADMIN_IDS.remove(target_id)
-            save_data()
-            await message.answer(f"✅ ID {target_id} удален из администраторов!")
-        else:
-            await message.answer("❌ Этот пользователь не является администратором")
-    except (IndexError, ValueError):
-        await message.answer("❌ Используйте: /remove_admin <ID_пользователя>")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-@dp.message(Command(commands=["clear_schedule"]))
-async def clear_schedule(message: types.Message):
-    """Очистить все расписание"""
-    user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
-        await message.answer("❌ Только администраторы могут очищать расписание!")
-        return
-    
-    try:
-        global schedule
-        schedule = {
-            "понедельник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-            "вторник": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-            "среда": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-            "четверг": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-            "пятница": {"верхняя": "❌ Расписание не настроено", "нижняя": "❌ Расписание не настроено"},
-            "суббота": "📅 Суббота — выходной 😴",
-            "воскресенье": "📅 Воскресенье — выходной 😴"
-        }
-        save_data()
-        await message.answer("✅ Все расписание очищено!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при очистке: {e}")
 
 async def on_startup():
     """Запуск планировщика при старте бота"""
@@ -531,7 +582,7 @@ async def on_startup():
     
     logger.info("Бот запущен и готов к работе!")
     logger.info(f"Загружены администраторы: {ADMIN_IDS}")
-    logger.info(f"Текущая неделя: {get_current_week()}")
+    logger.info(f"Загружено групп: {len(groups_data)}")
 
 async def on_shutdown():
     """Остановка планировщика при выключении бота"""
